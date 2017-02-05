@@ -17,6 +17,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
 type clientHandshakeState struct {
@@ -73,7 +74,7 @@ func (c *Conn) clientHandshake() error {
 		hello.secureRenegotiation = c.clientFinished[:]
 	}
 
-	possibleCipherSuites := c.config.cipherSuites()
+	possibleCipherSuites := c.config.cipherSuites(c.vers)
 	hello.cipherSuites = make([]uint16, 0, len(possibleCipherSuites))
 
 NextCipherSuite:
@@ -251,6 +252,8 @@ NextCipherSuite:
 	}
 
 	c.didResume = isResume
+	c.phase = handshakeConfirmed
+	atomic.StoreInt32(&c.handshakeConfirmed, 1)
 	c.handshakeComplete = true
 	c.cipherSuite = suite.id
 	return nil
@@ -599,7 +602,7 @@ func (hs *clientHandshakeState) readFinished(out []byte) error {
 	verify := hs.finishedHash.serverSum(hs.masterSecret)
 	if len(verify) != len(serverFinished.verifyData) ||
 		subtle.ConstantTimeCompare(verify, serverFinished.verifyData) != 1 {
-		c.sendAlert(alertHandshakeFailure)
+		c.sendAlert(alertDecryptError)
 		return errors.New("tls: server's Finished message was incorrect")
 	}
 	hs.finishedHash.Write(serverFinished.marshal())
